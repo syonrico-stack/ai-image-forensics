@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI 图像取证分析工具</title>
+<style>
+  :root{--bg:#0f1115;--card:#1a1d24;--line:#2a2e38;--fg:#e6e8ee;--sub:#9aa0ac;
+        --red:#e05c5c;--orange:#e09a3c;--yellow:#d3b545;--green:#4cb578;--blue:#5b8def}
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--fg);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding-bottom:60px}
+  header{padding:20px 22px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  header h1{font-size:19px}
+  header span{color:var(--sub);font-size:13px}
+  #cfg{margin-left:auto;font-size:12px;color:var(--sub)}
+  main{max-width:1060px;margin:0 auto;padding:20px 16px}
+  #drop{border:2px dashed var(--line);border-radius:14px;padding:42px 18px;text-align:center;color:var(--sub);
+        cursor:pointer;transition:.2s}
+  #drop.over{border-color:var(--blue);color:var(--fg);background:#161a22}
+  #drop b{color:var(--fg)}
+  #status{margin:14px 0;color:var(--sub);font-size:14px;min-height:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin:16px 0}
+  .verdict{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .badge{padding:6px 14px;border-radius:999px;font-weight:600;font-size:15px;color:#10131a}
+  .t-AI_TRACE{background:var(--red)} .t-REPROCESS{background:var(--orange)}
+  .t-REPROCESS_WEAK{background:var(--yellow)} .t-CLEAN{background:var(--green)}
+  .vsummary{color:var(--sub);font-size:14px;line-height:1.6;margin-top:8px}
+  .meta{font-size:12px;color:var(--sub);margin-top:10px;word-break:break-all;line-height:1.7}
+  .arts{display:flex;flex-wrap:wrap;gap:12px;margin-top:14px}
+  .arts figure{width:calc(50% - 6px)} .arts img{width:100%;border-radius:10px;border:1px solid var(--line);display:block}
+  .arts figcaption{font-size:12px;color:var(--sub);text-align:center;margin-top:5px}
+  @media(min-width:760px){.arts figure{width:calc(33.3% - 8px)}}
+  details{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}
+  summary{cursor:pointer;color:var(--sub);font-size:14px;padding:4px 0}
+  .mod{padding:10px 0;border-bottom:1px dashed var(--line)}
+  .mod:last-child{border:none}
+  .mod h4{font-size:14px;display:flex;gap:8px;align-items:center}
+  .mod ul{margin:6px 0 0 18px;font-size:13px;line-height:1.7}
+  .sev{font-size:11px;padding:1px 7px;border-radius:4px;margin-right:6px}
+  .sev-high{background:#4a2023;color:#f0a5a5}.sev-medium{background:#42311a;color:#eec27f}
+  .sev-low{background:#3d3a1c;color:#d8cd85}.sev-info{background:#232733;color:#9aa6c0}
+  .st{font-size:11px;color:var(--sub);margin-left:auto}
+  .note{font-size:12px;color:var(--sub);margin-top:6px;line-height:1.6}
+  .check{font-size:13px;line-height:1.9;color:var(--sub);margin-left:18px}
+  .btn{display:inline-block;margin-top:12px;padding:8px 16px;border-radius:8px;background:var(--blue);
+       color:#fff;text-decoration:none;font-size:13px;border:none;cursor:pointer}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
+  th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left}
+  th{color:var(--sub);font-weight:500}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+  .err{color:var(--red);font-size:13px}
+  .cluster{background:#221d12;border:1px solid #4a3d1a;border-radius:10px;padding:12px;margin-top:10px;font-size:13px;line-height:1.7}
+</style>
+</head>
+<body>
+<header>
+  <h1>AI 图像取证分析工具</h1>
+  <span>多模块取证分析 · 证据分级结论</span>
+  <span id="cfg"></span>
+</header>
+<main>
+  <div id="drop">
+    <b>拖拽图片到这里，或点击选择</b><br><br>
+    支持 JPG / PNG / WebP / HEIC，可多选批量分析<br>
+    <span style="font-size:12px">提示：尽量上传原始文件，截图和转发图会降低取证可信度</span>
+    <input type="file" id="file" multiple accept="image/*" hidden>
+  </div>
+  <div id="status"></div>
+  <div id="batch"></div>
+  <div id="results"></div>
+</main>
+
+<script>
+const MOD_NAMES={filemeta:"文件与元数据",ela:"ELA 误差水平分析",fft:"FFT 频谱分析",
+  noise:"噪声残差分析",clone:"克隆（复制粘贴）检测",online:"在线 AI 检测 + 稳定性测试"};
+const ART_NAMES={original:"原图",ela_heatmap:"ELA 热力图",fft_spectrum:"FFT 频谱",
+  noise_heatmap:"噪声强度热力图",clone_map:"克隆区域标记"};
+const SEV={high:"高",medium:"中",low:"低",info:"信息"};
+const TIER_COLOR={AI_TRACE:"var(--red)",REPROCESS:"var(--orange)",REPROCESS_WEAK:"var(--yellow)",CLEAN:"var(--green)"};
+
+const drop=document.getElementById('drop'),fileInput=document.getElementById('file'),
+      statusEl=document.getElementById('status'),resultsEl=document.getElementById('results'),
+      batchEl=document.getElementById('batch');
+drop.onclick=()=>fileInput.click();
+fileInput.onchange=()=>run(fileInput.files);
+drop.ondragover=e=>{e.preventDefault();drop.classList.add('over')};
+drop.ondragleave=()=>drop.classList.remove('over');
+drop.ondrop=e=>{e.preventDefault();drop.classList.remove('over');run(e.dataTransfer.files)};
+
+fetch('/api/config-status').then(r=>r.json()).then(c=>{
+  const parts=[];
+  parts.push(c.hf_enabled?`HF 开源模型${c.hf_has_token?'（已配 Token）':'（匿名）'}`:'HF 已禁用');
+  if(c.sightengine)parts.push('Sightengine ✓');
+  if(c.hive)parts.push('Hive ✓');
+  document.getElementById('cfg').textContent='检测层：'+parts.join(' · ');
+}).catch(()=>{});
+
+async function run(files){
+  if(!files.length)return;
+  const fd=new FormData();
+  for(const f of files)fd.append('files',f);
+  statusEl.textContent=`正在分析 ${files.length} 张图片，请稍候（批量分析可能需要几十秒）…`;
+  resultsEl.innerHTML='';batchEl.innerHTML='';
+  try{
+    const resp=await fetch('/api/analyze',{method:'POST',body:fd});
+    const data=await resp.json();
+    statusEl.textContent='';
+    if(data.batch_summary)renderBatch(data.batch_summary);
+    data.reports.forEach(renderReport);
+  }catch(e){statusEl.textContent='请求失败：'+e.message}
+}
+
+function renderBatch(s){
+  let rows=s.rows.map(r=>`<tr><td>${esc(r.file)}</td>
+    <td><span class="dot" style="background:${TIER_COLOR[r.tier]||'#888'}"></span>${esc(r.title)}</td>
+    <td>${r.quality}</td><td>${r.ai_score}/${r.reprocess_score}</td></tr>`).join('');
+  let clusters=Object.entries(s.fingerprint_clusters||{}).map(([k,v])=>
+    `<div class="cluster">⚠ <b>工具指纹聚类</b>：${v.length} 张图共享同一编码指纹「${esc(k)}」：${v.map(esc).join('、')}<br>
+    同一批图片经过同一条软件处理管线，建议重点复核。</div>`).join('');
+  batchEl.innerHTML=`<div class="card"><h3>批量汇总（${s.rows.length} 张）</h3>
+    <table><tr><th>文件</th><th>结论</th><th>文件质量</th><th>AI/再处理证据分</th></tr>${rows}</table>${clusters}</div>`;
+}
+
+function renderReport(r){
+  if(r.error){resultsEl.insertAdjacentHTML('beforeend',
+    `<div class="card"><h3>${esc(r.file)}</h3><p class="err">${esc(r.error)}</p></div>`);return}
+  const v=r.verdict;
+  const arts=Object.entries(r.artifacts||{}).map(([k,u])=>
+    `<figure><img src="${u}"><figcaption>${ART_NAMES[k]||k}</figcaption></figure>`).join('');
+  const mods=r.modules.map(m=>{
+    const items=(m.findings||[]).map(f=>
+      `<li><span class="sev sev-${f.severity}">${SEV[f.severity]||f.severity}</span>${esc(f.message)}</li>`).join('');
+    const st={ok:'✓',skipped:'⊘ 跳过',error:'✗ 异常'}[m.status]||m.status;
+    const note=m.note?`<p class="note">${esc(m.note)}</p>`:'';
+    return `<div class="mod"><h4>${MOD_NAMES[m.module]||m.module}<span class="st">${st}</span></h4>
+      <ul>${items}</ul>${note}</div>`;
+  }).join('');
+  const checklist=(r.manual_checklist||[]).map(x=>`<li>${esc(x)}</li>`).join('');
+  resultsEl.insertAdjacentHTML('beforeend',`<div class="card">
+    <div class="verdict"><span class="badge t-${v.tier}">${esc(v.title)}</span>
+    <span style="color:var(--sub);font-size:14px">${esc(r.file)}</span></div>
+    <p class="vsummary">${esc(v.summary)}</p>
+    <p class="meta">尺寸 ${r.size.width}×${r.size.height} ｜ 文件质量：${r.file_quality.grade} ｜
+    SHA-256：${r.sha256.slice(0,16)}…</p>
+    <div class="arts">${arts}</div>
+    <a class="btn" href="/api/report/${r.id}/html">导出 HTML 报告</a>
+    <details><summary>查看各模块详细证据</summary>${mods}
+    <div class="mod"><h4>建议的人工核查步骤</h4><ul class="check">${checklist}</ul></div></details>
+  </div>`);
+}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+</script>
+</body>
+</html>

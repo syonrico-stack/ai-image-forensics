@@ -1,0 +1,12 @@
+services:
+  forensics:
+    build: .
+    image: ai-image-forensics:latest
+    container_name: ai-image-forensics
+    ports:
+      - "8800:8000"          # 宿主机端口:容器端口，浏览器访问 http://localhost:8800
+    volumes:
+      - ./data:/app/data     # 分析报告与数据持久化到项目目录下的 data/
+    env_file:
+      - .env                 # 可选：API Key 等配置，见 .env.example
+    restart: always          # 崩溃/重启后自动拉起（配合 OrbStack 开机自启实现常驻）
